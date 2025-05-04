@@ -1,0 +1,3 @@
+[console_scripts]
+java-analyzer = java_analyzer.analyzer.run_analyzer:main
+java-analyzer-web = java_analyzer.web.app:run_app

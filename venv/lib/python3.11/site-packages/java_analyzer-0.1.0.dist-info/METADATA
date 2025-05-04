@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: java_analyzer
+Version: 0.1.0
+Summary: A tool for analyzing Java source code and tracing method call stacks
+Author: Your Name
+Author-email: your.email@example.com
+Keywords: java,code analysis,call stack
+Requires-Python: >=3.6
+Requires-Dist: javalang
+Requires-Dist: flask
+Requires-Dist: flaskwebgui
+Dynamic: author
+Dynamic: author-email
+Dynamic: keywords
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
