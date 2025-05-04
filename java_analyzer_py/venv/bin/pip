@@ -1,4 +1,4 @@
-#!/Users/tnguyen/Work/FCC/java_analyzer/venv/bin/python3.11
+#!/Users/tnguyen/Work/FCC/java_analyzer_py/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

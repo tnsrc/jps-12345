@@ -13,6 +13,7 @@ from ..database.schema import (
     get_available_databases, set_active_database, get_active_database, 
     DB_DIR, DEFAULT_DB_NAME
 )
+from ..database.db_utils import get_connection
 from ..analyzer import JavaAnalyzer
 
 app = Flask(__name__, 
@@ -183,6 +184,90 @@ def check_method_exists():
             'success': True, 
             'exists': exists,
             'count': len(methods)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/methods/autocomplete')
+def autocomplete_methods():
+    """Provide autocomplete suggestions for method names or signatures"""
+    term = request.args.get('term', '')
+    suggestion_type = request.args.get('type', 'name')  # 'name' or 'signature'
+    limit = request.args.get('limit', 10, type=int)
+    
+    # Only require minimum length if a term is provided
+    if term and len(term) < 2:
+        return jsonify({'success': False, 'error': 'Search term must be at least 2 characters'}), 400
+        
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if suggestion_type == 'name':
+            # When no term is provided, get the most recently added methods
+            if not term:
+                query = """
+                    SELECT DISTINCT name 
+                    FROM methods 
+                    ORDER BY id DESC
+                    LIMIT ?
+                """
+                cursor.execute(query, (limit,))
+            else:
+                query = """
+                    SELECT DISTINCT name 
+                    FROM methods 
+                    WHERE name LIKE ? 
+                    ORDER BY name 
+                    LIMIT ?
+                """
+                cursor.execute(query, (f"%{term}%", limit))
+                
+            results = [row[0] for row in cursor.fetchall()]
+            
+        elif suggestion_type == 'signature':
+            # When no term is provided, get the most recently added methods
+            if not term:
+                query = """
+                    SELECT m.signature, c.name as class_name, c.package 
+                    FROM methods m
+                    JOIN classes c ON m.class_id = c.id
+                    ORDER BY m.id DESC
+                    LIMIT ?
+                """
+                cursor.execute(query, (limit,))
+            else:
+                query = """
+                    SELECT m.signature, c.name as class_name, c.package 
+                    FROM methods m
+                    JOIN classes c ON m.class_id = c.id
+                    WHERE m.signature LIKE ? 
+                    ORDER BY m.signature 
+                    LIMIT ?
+                """
+                cursor.execute(query, (f"%{term}%", limit))
+                
+            results = []
+            for row in cursor.fetchall():
+                signature = row[0]
+                class_name = row[1]
+                package = row[2] or ''
+                full_info = {
+                    'signature': signature,
+                    'class_name': class_name,
+                    'package': package,
+                    'display': f"{package}.{class_name}: {signature}" if package else f"{class_name}: {signature}"
+                }
+                results.append(full_info)
+            
+        else:
+            return jsonify({'success': False, 'error': 'Invalid suggestion type'}), 400
+            
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'suggestions': results
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

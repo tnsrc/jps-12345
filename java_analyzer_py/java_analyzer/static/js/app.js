@@ -20,6 +20,20 @@ document.addEventListener('DOMContentLoaded', function() {
         localStorage.setItem('hideUntraceableMethods', 'true');
     }
     
+    // Create New Project toggle handler
+    document.getElementById('create-new-project').addEventListener('change', function(e) {
+        const createNewDb = e.target.checked;
+        const newDbContainer = document.getElementById('new-db-container');
+        
+        if (createNewDb) {
+            newDbContainer.classList.remove('d-none');
+            newDbContainer.classList.add('d-flex');
+        } else {
+            newDbContainer.classList.add('d-none');
+            newDbContainer.classList.remove('d-flex');
+        }
+    });
+    
     // Database selection handlers
     document.getElementById('database-select').addEventListener('change', function() {
         const selectedDb = this.value;
@@ -396,11 +410,10 @@ function loadMethods(classId, className, skipHistory = false) {
 
 // Search for methods
 function searchMethods() {
-    const methodName = document.getElementById('method-name').value.trim();
     const methodSignature = document.getElementById('method-signature').value.trim();
     
-    if (!methodName && !methodSignature) {
-        showAlert('Please enter a method name or signature to search for.', 'warning');
+    if (!methodSignature) {
+        showAlert('Please enter a method signature to search for.', 'warning');
         return;
     }
     
@@ -414,12 +427,11 @@ function searchMethods() {
     
     // Update breadcrumbs
     updateBreadcrumbs([
-        { text: `Search: ${methodName || methodSignature}`, onclick: "document.getElementById('search-form').dispatchEvent(new Event('submit'))" }
+        { text: `Search: ${methodSignature}`, onclick: "document.getElementById('search-form').dispatchEvent(new Event('submit'))" }
     ]);
     
     const params = new URLSearchParams();
-    if (methodName) params.append('name', methodName);
-    if (methodSignature) params.append('signature', methodSignature);
+    params.append('signature', methodSignature);
     
     fetch(`/methods/search?${params.toString()}`)
         .then(response => response.json())

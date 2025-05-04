@@ -3,43 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Java Project Analyzer</title>
+    <title>RE Java Project Analyzer</title>
     <!-- Use local versions of all libraries -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/css/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/css/fontawesome.min.css') }}">
+    <!-- FontAwesome from CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Local highlight.js for syntax highlighting -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/css/highlight.github.min.css') }}">
     <script src="{{ url_for('static', filename='vendor/js/highlight.min.js') }}"></script>
     <script src="{{ url_for('static', filename='vendor/js/highlight.java.min.js') }}"></script>
+    <style>
+        body {
+            padding-top: 100px; /* Increased from 60px to accommodate the taller navbar */
+        }
+        
+        /* Sidebar collapse transitions */
+        .sidebar {
+            transition: width 0.3s, min-width 0.3s;
+        }
+        
+        .main-content {
+            transition: width 0.3s, margin-left 0.3s;
+        }
+        
+        /* Collapsed sidebar */
+        .sidebar-collapsed {
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            overflow: hidden;
+        }
+        
+        /* Toggle button */
+        #sidebar-toggle {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            z-index: 1040;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #343a40;
+            border: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Expanded main content */
+        .content-expanded {
+            margin-left: 0 !important;
+            width: 100% !important;
+        }
+    </style>
 </head>
 <body>
+    <!-- Top Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <div class="d-flex flex-column align-items-start">
+                <a class="navbar-brand" href="#">RE Java Project Analyzer</a>
+                <div class="dropdown">
+                    <a class="nav-link dropdown-toggle text-light px-0" href="#" id="databaseDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <span id="selected-db-name">Select Database</span>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-dark" id="database-menu" style="min-width: 220px;">
+                        <!-- Database options will be added here by JavaScript -->
+                        <div class="dropdown-item text-center text-muted">
+                            <small>Loading databases...</small>
+                        </div>
+                    </div>
+                    <div class="text-secondary small mt-1" id="db-path"></div>
+                </div>
+            </div>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNavbar" aria-controls="topNavbar" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="topNavbar">
+                <!-- Navigation elements -->
+                <ul class="navbar-nav me-auto">
+                    <!-- Empty navbar-nav to maintain layout -->
+                </ul>
+                
+                <!-- Search form with Project Classes dropdown to its left -->
+                <div class="d-flex align-items-center ms-auto">
+                    <!-- Project Classes Dropdown -->
+                    <li class="nav-item dropdown list-unstyled me-3">
+                        <a class="nav-link dropdown-toggle text-white" href="#" id="projectClassesDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            Project Classes
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-dark overflow-auto" id="class-list" aria-labelledby="projectClassesDropdown" style="max-height: 50vh;">
+                            <!-- Classes will be loaded here -->
+                        </div>
+                    </li>
+                    
+                    <form id="search-form" class="d-flex align-items-center">
+                        <div class="me-2 position-relative" style="width: 600px;">
+                            <input type="text" class="form-control" id="method-signature" placeholder="Method Signature" autocomplete="off">
+                            <div id="custom-dropdown" class="position-absolute w-100 bg-dark shadow rounded mt-1 d-none" style="max-height: 300px; overflow-y: auto; z-index: 1000;">
+                                <!-- Method signatures will be loaded here -->
+                            </div>
+                        </div>
+                        <button type="button" id="reset-btn" class="btn btn-outline-light">Reset</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+
     <div class="container-fluid">
         <div class="row">
             <!-- Sidebar -->
-            <div class="col-lg-3 col-md-4 sidebar">
-                <h2 class="sidebar-title">Java Project Analyzer</h2>
+            <div class="col-lg-3 col-md-4 sidebar" id="sidebar">
                 
                 <div class="form-section">
-                    <h4>Database Selection</h4>
-                    <div class="mb-3">
-                        <label for="database-select" class="form-label">Select Database</label>
-                        <select class="form-select" id="database-select">
-                            <option value="">Loading databases...</option>
-                        </select>
-                    </div>
-                    <div class="d-flex">
-                        <input type="text" class="form-control me-2" id="new-db-name" placeholder="New DB name">
-                        <button class="btn btn-outline-light" id="create-db-btn">Create</button>
-                    </div>
-                    <div class="mt-2">
-                        <span id="db-path" class="text-light small"></span>
-                    </div>
-                </div>
-                
-                <div class="form-section mt-4">
                     <h4>Analyze Project</h4>
                     <form id="analyze-form">
+                        <div class="mb-3 form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="create-new-project">
+                            <label class="form-check-label" for="create-new-project">Create New Project</label>
+                        </div>
+                        <div class="d-none mb-3" id="new-db-container">
+                            <input type="text" class="form-control me-2" id="new-db-name" placeholder="New DB name">
+                            <button class="btn btn-outline-light" id="create-db-btn">Create</button>
+                        </div>
                         <div class="mb-3">
                             <label for="source-dir" class="form-label">Java Source Directory</label>
                             <input type="text" class="form-control" id="source-dir" placeholder="/path/to/java/src">
@@ -53,21 +144,6 @@
                 </div>
                 
                 <div class="form-section mt-4">
-                    <h4>Search Methods</h4>
-                    <form id="search-form">
-                        <div class="mb-3">
-                            <label for="method-name" class="form-label">Method Name</label>
-                            <input type="text" class="form-control" id="method-name" placeholder="methodName">
-                        </div>
-                        <div class="mb-3">
-                            <label for="method-signature" class="form-label">Method Signature (optional)</label>
-                            <input type="text" class="form-control" id="method-signature" placeholder="methodName(Type param)">
-                        </div>
-                        <button type="submit" class="btn btn-secondary">Search</button>
-                    </form>
-                </div>
-                
-                <div class="form-section mt-4">
                     <h4>Display Options</h4>
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="hide-untraceable-methods">
@@ -75,17 +151,10 @@
                     </div>
                     <small class="text-light d-block mt-1">Only show methods that can be traced in the call stack</small>
                 </div>
-                
-                <div class="class-list mt-4">
-                    <h4>Project Classes</h4>
-                    <div class="list-group" id="class-list">
-                        <!-- Classes will be loaded here -->
-                    </div>
-                </div>
             </div>
             
             <!-- Main content -->
-            <div class="col-lg-9 col-md-8 main-content">
+            <div class="col-lg-9 col-md-8 main-content" id="main-content">
                 <div class="content-header">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <h3 id="content-title">Method Call Stack Trace</h3>
@@ -203,8 +272,316 @@
         </div>
     </div>
 
+    <!-- Toggle sidebar button -->
+    <button id="sidebar-toggle" title="Toggle Sidebar">
+        <i class="fas fa-chevron-left" id="sidebar-toggle-icon"></i>
+    </button>
+
+    <!-- Hidden compatibility elements -->
+    <div style="display: none;">
+        <select id="database-select"></select>
+    </div>
+
     <!-- JavaScript -->
     <script src="{{ url_for('static', filename='vendor/js/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // Keep the class dropdown menu open when clicking on items inside it
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add click event listener to the dropdown menu
+            const classDropdown = document.getElementById('class-list');
+            classDropdown.addEventListener('click', function(e) {
+                // Prevent the dropdown from closing when clicking on accordion headers
+                if (e.target.classList.contains('accordion-button') || 
+                    e.target.closest('.accordion-button') || 
+                    e.target.closest('.accordion-collapse')) {
+                    e.stopPropagation();
+                }
+                
+                // Only allow the dropdown to close when clicking on actual class links
+                if (e.target.classList.contains('list-group-item-action') && 
+                    !e.target.classList.contains('accordion-button')) {
+                    // Let the dropdown close naturally
+                } else {
+                    e.stopPropagation();
+                }
+            });
+            
+            // Method signature autocomplete with custom dropdown
+            const methodSignatureInput = document.getElementById('method-signature');
+            const customDropdown = document.getElementById('custom-dropdown');
+            
+            // Show dropdown when input field is clicked
+            methodSignatureInput.addEventListener('focus', function() {
+                const term = this.value.trim();
+                
+                // If there's already text, use that for filtering
+                if (term.length >= 2) {
+                    fetchSuggestions(term);
+                } else {
+                    // Otherwise, fetch the first set of signatures (limit to 20)
+                    fetchSuggestions('', 20);
+                }
+            });
+            
+            // Function to fetch and display suggestions
+            function fetchSuggestions(term, limit = 10) {
+                // Build query parameters
+                const params = new URLSearchParams();
+                params.append('type', 'signature');
+                params.append('limit', limit);
+                
+                if (term) {
+                    params.append('term', term);
+                }
+                
+                // Fetch method signature suggestions
+                fetch(`/methods/autocomplete?${params.toString()}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        customDropdown.innerHTML = '';
+                        
+                        if (data.success && data.suggestions && data.suggestions.length > 0) {
+                            data.suggestions.forEach(suggestion => {
+                                const item = document.createElement('div');
+                                item.className = 'px-3 py-2 dropdown-item text-light';
+                                item.style.cursor = 'pointer';
+                                item.style.borderBottom = '1px solid #444';
+                                
+                                // Format the display with class/package in light color and signature in bold
+                                const packageClass = suggestion.package ? 
+                                    `<span class="text-light">${suggestion.package}.</span><span class="text-info">${suggestion.class_name}</span>: ` : 
+                                    `<span class="text-info">${suggestion.class_name}</span>: `;
+                                
+                                item.innerHTML = packageClass + `<span class="fw-bold">${suggestion.signature}</span>`;
+                                
+                                // When item is clicked, use the signature value and submit
+                                item.addEventListener('click', function() {
+                                    methodSignatureInput.value = suggestion.signature;
+                                    customDropdown.classList.add('d-none');
+                                    document.getElementById('search-form').dispatchEvent(new Event('submit'));
+                                });
+                                
+                                // Highlight on hover
+                                item.addEventListener('mouseenter', function() {
+                                    this.classList.add('bg-primary');
+                                });
+                                
+                                item.addEventListener('mouseleave', function() {
+                                    this.classList.remove('bg-primary');
+                                });
+                                
+                                customDropdown.appendChild(item);
+                            });
+                            
+                            customDropdown.classList.remove('d-none');
+                        } else {
+                            customDropdown.classList.add('d-none');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching method signature suggestions:', error);
+                        customDropdown.classList.add('d-none');
+                    });
+            }
+            
+            methodSignatureInput.addEventListener('input', function() {
+                const term = this.value.trim();
+                if (term.length < 2) {
+                    customDropdown.classList.add('d-none');
+                    return;
+                }
+                
+                fetchSuggestions(term);
+            });
+            
+            // Hide dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!methodSignatureInput.contains(e.target) && !customDropdown.contains(e.target)) {
+                    customDropdown.classList.add('d-none');
+                }
+            });
+            
+            // Handle keyboard navigation in dropdown
+            methodSignatureInput.addEventListener('keydown', function(e) {
+                if (customDropdown.classList.contains('d-none')) return;
+                
+                const items = customDropdown.querySelectorAll('.dropdown-item');
+                if (items.length === 0) return;
+                
+                const activeItem = customDropdown.querySelector('.bg-primary');
+                let activeIndex = -1;
+                
+                if (activeItem) {
+                    // Find the current active index
+                    for (let i = 0; i < items.length; i++) {
+                        if (items[i] === activeItem) {
+                            activeIndex = i;
+                            break;
+                        }
+                    }
+                }
+                
+                // Arrow Down
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (activeItem) activeItem.classList.remove('bg-primary');
+                    
+                    // Move to next item or first if at end
+                    activeIndex = (activeIndex + 1) % items.length;
+                    items[activeIndex].classList.add('bg-primary');
+                    items[activeIndex].scrollIntoView({ block: 'nearest' });
+                }
+                // Arrow Up
+                else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (activeItem) activeItem.classList.remove('bg-primary');
+                    
+                    // Move to previous item or last if at start
+                    activeIndex = (activeIndex - 1 + items.length) % items.length;
+                    items[activeIndex].classList.add('bg-primary');
+                    items[activeIndex].scrollIntoView({ block: 'nearest' });
+                }
+                // Enter to select
+                else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (activeItem) {
+                        activeItem.click();
+                    } else {
+                        document.getElementById('search-form').dispatchEvent(new Event('submit'));
+                    }
+                    this.blur();
+                    customDropdown.classList.add('d-none');
+                }
+                // Escape to close
+                else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    customDropdown.classList.add('d-none');
+                }
+            });
+            
+            // Hide dropdown when search button is clicked
+            document.getElementById('search-form').addEventListener('submit', function(e) {
+                e.preventDefault(); // Prevent form submission since we handle it via JavaScript
+                methodSignatureInput.blur();
+                customDropdown.classList.add('d-none');
+                
+                // Get the current value and perform search
+                const term = methodSignatureInput.value.trim();
+                if (term.length > 0) {
+                    searchMethods(); // Call the existing searchMethods function
+                }
+            });
+            
+            // Reset button functionality
+            document.getElementById('reset-btn').addEventListener('click', function() {
+                // Clear the method signature input
+                methodSignatureInput.value = '';
+                // Hide the dropdown
+                customDropdown.classList.add('d-none');
+                // Focus on the input field for new entry
+                methodSignatureInput.focus();
+            });
+            
+            // Sidebar toggle functionality
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('main-content');
+            const toggleIcon = document.getElementById('sidebar-toggle-icon');
+            
+            // Check if sidebar state is stored in localStorage
+            const sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+            
+            // Apply initial state
+            if (sidebarCollapsed) {
+                sidebar.classList.add('sidebar-collapsed');
+                mainContent.classList.add('content-expanded');
+                toggleIcon.classList.remove('fa-chevron-left');
+                toggleIcon.classList.add('fa-chevron-right');
+            }
+            
+            sidebarToggle.addEventListener('click', function() {
+                // Toggle sidebar collapsed state
+                sidebar.classList.toggle('sidebar-collapsed');
+                mainContent.classList.toggle('content-expanded');
+                
+                // Update toggle icon
+                if (sidebar.classList.contains('sidebar-collapsed')) {
+                    toggleIcon.classList.remove('fa-chevron-left');
+                    toggleIcon.classList.add('fa-chevron-right');
+                    localStorage.setItem('sidebarCollapsed', 'true');
+                } else {
+                    toggleIcon.classList.remove('fa-chevron-right');
+                    toggleIcon.classList.add('fa-chevron-left');
+                    localStorage.setItem('sidebarCollapsed', 'false');
+                }
+            });
+            
+            // Update selected database name in dropdown
+            const selectedDbNameElement = document.getElementById('selected-db-name');
+            const databaseMenu = document.getElementById('database-menu');
+            
+            // Override the loadAvailableDatabases function to populate the dropdown menu
+            const originalLoadAvailableDatabases = window.loadAvailableDatabases;
+            
+            if (typeof originalLoadAvailableDatabases === 'function') {
+                window.loadAvailableDatabases = function() {
+                    // Call the original function first - this will fill the hidden select element
+                    const originalPromise = originalLoadAvailableDatabases.apply(this, arguments);
+                    
+                    // After databases are loaded, update our custom dropdown UI
+                    fetch('/available_databases')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Clear existing menu items
+                                databaseMenu.innerHTML = '';
+                                
+                                if (data.databases.length === 0) {
+                                    databaseMenu.innerHTML = '<div class="dropdown-item text-center text-muted"><small>No databases available</small></div>';
+                                    return;
+                                }
+                                
+                                // Add each database as a menu item
+                                data.databases.forEach(db => {
+                                    const item = document.createElement('a');
+                                    item.className = 'dropdown-item';
+                                    item.href = 'javascript:void(0)';
+                                    item.textContent = db;
+                                    
+                                    // Mark the active database
+                                    if (data.active_database === db) {
+                                        item.className += ' active';
+                                        selectedDbNameElement.textContent = db;
+                                    }
+                                    
+                                    // Add click handler to switch database
+                                    item.addEventListener('click', function(e) {
+                                        e.preventDefault();
+                                        if (window.switchDatabase) {
+                                            window.switchDatabase(db);
+                                            selectedDbNameElement.textContent = db;
+                                        }
+                                    });
+                                    
+                                    databaseMenu.appendChild(item);
+                                });
+                                
+                                // Mark the active database in the UI
+                                if (data.active_database) {
+                                    selectedDbNameElement.textContent = data.active_database;
+                                }
+                            }
+                        })
+                        .catch(error => console.error('Error fetching databases:', error));
+                        
+                    return originalPromise;
+                };
+                
+                // Call it once to initialize
+                window.loadAvailableDatabases();
+            }
+        });
+    </script>
 </body>
 </html> 
