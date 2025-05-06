@@ -9,6 +9,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DatabaseManager {
     private static final Logger logger = LoggerFactory.getLogger(DatabaseManager.class);
@@ -147,6 +149,21 @@ public class DatabaseManager {
             }
         }
         return -1;
+    }
+
+    public List<String> getPackagesForClass(String className) throws SQLException {
+        List<String> packages = new ArrayList<>();
+        String sql = "SELECT package_name FROM classes WHERE class_name = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, className);
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    packages.add(rs.getString("package_name"));
+                }
+            }
+        }
+        return packages;
     }
 
     public void close() {

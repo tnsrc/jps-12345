@@ -96,9 +96,7 @@ def create_tables(db_path=None):
         called_method TEXT,
         called_signature TEXT,
         line_number INTEGER,
-        resolved_method_id INTEGER,
-        FOREIGN KEY (caller_method_id) REFERENCES methods(id) ON DELETE CASCADE,
-        FOREIGN KEY (resolved_method_id) REFERENCES methods(id) ON DELETE SET NULL
+        FOREIGN KEY (caller_method_id) REFERENCES methods(id) ON DELETE CASCADE
     )
     ''')
     

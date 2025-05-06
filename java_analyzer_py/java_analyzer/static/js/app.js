@@ -568,68 +568,29 @@ function findClassByNameAndPackage(className, packageName, callback) {
 // Build trace tree HTML from trace data with asynchronous method existence checking
 async function buildTraceTree(node) {
     if (!node) return '';
-    
     // Get the "hide untraceable methods" preference
     const hideUntraceableMethods = document.getElementById('hide-untraceable-methods').checked;
-    
-    // Format location info for the method
-    let locationInfo = '';
-    if (node.file_path && node.start_line) {
-        const fileName = node.file_path.split('/').pop();
-        locationInfo = `<span class="text-muted file-location">
-            <i class="fas fa-file-code"></i> ${fileName}:${node.start_line}
-            ${node.end_line ? ('-' + node.end_line) : ''}
-        </span>`;
+    let html = `<div class="trace-node">`;
+    html += `<div class="trace-node-header">`;
+    html += `<span class="trace-node-name">${node.method_name || node.called_method}</span>`;
+    if (node.class_name || node.called_class_name) {
+        html += `<span class="trace-node-class">(${node.package ? node.package + '.' : ''}${node.class_name || node.called_class_name})</span>`;
     }
-    
-    // Make the class name clickable if it exists
-    const classNameHtml = node.class_name ? 
-        `(<a href="javascript:void(0)" class="class-link" onclick="onClassClick('${node.class_name}', '${node.package || ''}')">
-            ${node.package ? node.package + '.' : ''}${node.class_name}
-        </a>)` :
-        '';
-    
-    let html = `
-        <div class="trace-node">
-            <div class="trace-node-header">
-                <div>
-                    <span class="trace-node-name">${node.method_name}</span>
-                    <span class="trace-node-class">${classNameHtml}</span>
-                    ${locationInfo}
-                </div>
-    `;
-    
-    if (node.calls && node.calls.length > 0) {
-        html += `<button class="trace-node-toggle"><i class="fas fa-minus"></i></button>`;
-    }
-    
     html += `</div>`;
-    
     if (node.calls && node.calls.length > 0) {
         html += `<div class="trace-node-children">`;
-        
-        // Process all calls in parallel
         const callPromises = node.calls.map(async (call) => {
-            // Skip Java standard library methods
-            const isJavaStdLib = call.called_package && 
-                (call.called_package.startsWith('java.') || 
-                 call.called_package.startsWith('javax.'));
-            
-            // Format line number for call
+            const isJavaStdLib = call.called_package && (call.called_package.startsWith('java.') || call.called_package.startsWith('javax.'));
             const lineInfo = call.line_number ? `<span class="text-muted call-line-num">:${call.line_number}</span>` : '';
-            
-            // If it's not resolved but not part of standard library, check if it exists in the database
+            // Check if method exists in the database
             let methodExists = false;
-            if (!call.resolved_method_id && !isJavaStdLib) {
+            if (!isJavaStdLib) {
                 methodExists = await checkMethodExists(call.called_method);
             }
-            
             // If hiding untraceable methods and this method can't be traced, skip it
-            if (hideUntraceableMethods && !call.resolved_method_id && !methodExists && !isJavaStdLib) {
+            if (hideUntraceableMethods && !isJavaStdLib && !methodExists) {
                 return '';
             }
-            
-            // Make the class name clickable
             const calledClassHtml = call.called_class_name ? 
                 `(<a href="javascript:void(0)" class="class-link" onclick="onClassClick('${call.called_class_name}', '${call.called_package || ''}')">
                     ${call.called_package ? call.called_package + '.' : ''}${call.called_class_name}
@@ -637,7 +598,6 @@ async function buildTraceTree(node) {
                 call.called_class ? 
                 `(<span class="class-name-unresolved">${call.called_class}</span>)` : 
                 '';
-            
             let callHtml = `
                 <div class="trace-node">
                     <div class="trace-node-header">
@@ -649,45 +609,29 @@ async function buildTraceTree(node) {
                             </span>
                             <span class="trace-node-class">${calledClassHtml}</span>
                             ${!isJavaStdLib ? 
-                                (call.resolved_method_id ? 
-                                    `<button class="btn btn-xs btn-primary btn-trace method-trace-btn ms-2" onclick="event.stopPropagation(); traceMethod(${call.resolved_method_id}, '${call.called_method}')">
-                                        <i class="fas fa-project-diagram"></i> Trace
-                                    </button>` : 
-                                    (methodExists ? 
-                                        `<button class="btn btn-xs btn-outline-primary btn-trace method-trace-btn ms-2" onclick="event.stopPropagation(); findAndTraceMethod('${call.called_method}', '${call.called_class_name || call.called_class || ''}', '${call.called_package || ''}')">
-                                            <i class="fas fa-search"></i> Find & Trace
-                                        </button>` : 
-                                        '')) : 
+                                `<button class="btn btn-xs btn-outline-primary btn-trace method-trace-btn ms-2" onclick="event.stopPropagation(); findAndTraceMethod('${call.called_method}', '${call.called_class_name || call.called_class || ''}', '${call.called_package || ''}')">
+                                    <i class="fas fa-search"></i> Find & Trace
+                                </button>` : 
                                 ''}
                         </div>
             `;
-            
             if (call.children && Object.keys(call.children).length > 0) {
                 callHtml += `<button class="trace-node-toggle"><i class="fas fa-minus"></i></button>`;
             }
-            
             callHtml += `</div>`;
-            
             if (call.children && Object.keys(call.children).length > 0) {
                 callHtml += `<div class="trace-node-children">`;
                 callHtml += await buildTraceTree(call.children);
                 callHtml += `</div>`;
             }
-            
             callHtml += `</div>`;
-            
             return callHtml;
         });
-        
-        // Wait for all calls to be processed
         const callsHtml = await Promise.all(callPromises);
         html += callsHtml.join('');
-        
         html += `</div>`;
     }
-    
     html += `</div>`;
-    
     return html;
 }
 
@@ -725,6 +669,7 @@ function traceMethod(methodId, methodName, skipHistory = false) {
         .then(response => response.json())
         .then(async data => {
             if (data.success) {
+                window.lastCallTraceData = data.trace;
                 const callTraceContainer = document.getElementById('call-trace');
                 const traceMethodName = document.getElementById('trace-method-name');
                 const traceTree = document.getElementById('trace-tree');
@@ -774,52 +719,116 @@ function traceMethod(methodId, methodName, skipHistory = false) {
         });
 }
 
-// Fetch and display method source code with execution paths
+// Fetch and display method source code with execution paths, and append all nested callee sources recursively (no duplicates)
 function fetchMethodSource(methodId, methodName) {
     showLoading();
-    
     fetch(`/methods/${methodId}/source`)
         .then(response => response.json())
-        .then(data => {
+        .then(async data => {
             hideLoading();
-            
             if (data.success) {
                 const methodSourceContainer = document.getElementById('method-source');
                 const sourceMethodName = document.getElementById('source-method-name');
                 const sourceFileLocation = document.getElementById('source-file-location');
                 const sourceCode = document.getElementById('method-source-code');
-                
                 // Set method name and file location
                 const method = data.method;
                 sourceMethodName.textContent = `${method.name}${method.signature.substring(method.name.length)}`;
-                
-                // Extract filename from the path
                 const filePath = method.class_name;
                 const packagePath = method.package ? method.package + '.' : '';
                 sourceFileLocation.textContent = `${packagePath}${method.class_name} (Lines ${method.start_line}-${method.end_line})`;
-                
                 // Format and display the source code with line numbers
                 const sourceLines = method.source_code.split('\n');
-                
-                // Generate HTML without highlighting first
                 let formattedCode = '';
                 sourceLines.forEach((line, index) => {
-                    // Use actual file line number instead of index
                     const lineNum = method.start_line + index;
-                    formattedCode += `<span class="line" data-line="${lineNum}">${escapeHtml(line)}</span>`;
+                    formattedCode += `<span class=\"line\" data-line=\"${lineNum}\">${escapeHtml(line)}</span>`;
                 });
-                sourceCode.innerHTML = formattedCode;
-                
-                // Apply syntax highlighting to each line
+                // Recursively fetch and append all nested callee sources (no duplicates)
+                const traceTree = window.lastCallTraceData;
+                let allFormattedLines = formattedCode; // Start with caller's lines
+                const seen = new Set();
+                async function collectCalleeSourcesRecursive(node, depth = 0) {
+                    if (!node) {
+                        console.log('No node at depth', depth);
+                        return;
+                    }
+                    if (!node.calls || !Array.isArray(node.calls)) {
+                        console.log('No calls array at depth', depth, node);
+                        return;
+                    }
+                    for (const call of node.calls) {
+                        if (!call) {
+                            console.log('Null call at depth', depth);
+                            continue;
+                        }
+                        const foundMethod = await findMethod(call.called_method, call.called_class_name, call.called_package);
+                        if (!foundMethod) {
+                            console.log('Call missing method_id:', call);
+                            continue;
+                        }
+                        let methodId = foundMethod.id;
+                        if (methodId && !seen.has(methodId)) {
+                            console.log('Fetching callee source for', methodId, 'at depth', depth);
+                            seen.add(methodId);
+                            try {
+                                const resp = await fetch(`/methods/${methodId}/source`);
+                                const calleeData = await resp.json();
+                                if (calleeData.success && calleeData.method && calleeData.method.source_code) {
+                                    // Add a visual separator/header for the callee
+                                    allFormattedLines += `<div class='mt-4 mb-2'><strong>// ---- Callee: ${calleeData.method.package}.${calleeData.method.class_name} ${calleeData.method.signature} ----</strong></div>`;
+                                    // Add line numbers reflecting the actual line number in the callee source, using <div> for each line
+                                    const calleeSourceLines = calleeData.method.source_code.split('\n');
+                                    const calleeStartLine = calleeData.method.start_line || 1;
+                                    calleeSourceLines.forEach((line, idx) => {
+                                        const lineNum = calleeStartLine + idx;
+                                        allFormattedLines += `<div class='line' data-line='${lineNum}'>${escapeHtml(line)}</div>`;
+                                    });
+                                }
+                            } catch (err) {
+                                console.error('Error fetching callee source for', methodId, err);
+                            }
+                            // Recursively collect for this callee
+                            const calleeNode = findNodeByMethodId(traceTree, methodId);
+                            if (calleeNode) {
+                                await collectCalleeSourcesRecursive(calleeNode, depth + 1);
+                            } else {
+                                console.log('Callee node not found in trace tree for', methodId);
+                            }
+                        }
+                    }
+                }
+                // Find the current node in the trace tree
+                function findNodeByMethodId(node, id) {
+                    if (!node) return null;
+                    if (node.method_id == id) return node;
+                    if (node.calls) {
+                        for (const call of node.calls) {
+                            const found = findNodeByMethodId(call, id);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                }
+                // Add the main method to seen so it doesn't get duplicated
+                seen.add(methodId);
+                const currentNode = findNodeByMethodId(traceTree, methodId);
+                if (!currentNode) {
+                    console.log('Current node not found in trace tree for', methodId);
+                } else {
+                    await collectCalleeSourcesRecursive(currentNode, 0);
+                }
+                // Add a visual separator/header for the caller
+                allFormattedLines = `<div class='mt-4 mb-2'><strong>// ---- Caller: ${method.package}.${method.class_name} ${method.signature} ----</strong></div>` + allFormattedLines;
+                // Insert the combined source code (caller + callees) as HTML
+                sourceCode.innerHTML = allFormattedLines;
                 applyJavaSyntaxHighlighting(sourceCode);
-                
-                // Store execution paths for later use
+                // Also highlight any appended <code> blocks (should be redundant now)
+                sourceCode.querySelectorAll('code.language-java').forEach(el => {
+                    if (window.hljs) hljs.highlightElement(el);
+                });
                 sourceCode.dataset.executionPaths = JSON.stringify(method.execution_paths);
-                
-                // Show the source code section
                 methodSourceContainer.classList.remove('d-none');
-                
-                // Set up the toggle button for execution paths
                 setupExecutionPathsToggle(method.execution_paths);
             } else {
                 showAlert('Failed to load method source: ' + (data.error || 'Unknown error'), 'warning');
@@ -1066,50 +1075,42 @@ function traceMethodByNameAndClass(methodName, className, packageName) {
         });
 }
 
+// Find a method in the database by name, class, and package (returns the best match or null)
+async function findMethod(methodName, className, packageName) {
+    const params = new URLSearchParams();
+    params.append('name', methodName);
+    params.append('exact_match', 'true');
+    const response = await fetch(`/methods/search?${params.toString()}`);
+    const data = await response.json();
+    if (data.success && data.methods.length > 0) {
+        let method = null;
+        if (className && packageName) {
+            method = data.methods.find(m =>
+                m.name === methodName &&
+                m.class_name === className &&
+                m.package === packageName
+            );
+        } else if (className) {
+            method = data.methods.find(m =>
+                m.name === methodName &&
+                m.class_name === className
+            );
+        }
+        // If no exact match but we have candidates, return the first one
+        if (!method) {
+            method = data.methods[0];
+        }
+        return method;
+    }
+    return null;
+}
+
 // Find and trace method that doesn't have a resolved_method_id
 function findAndTraceMethod(methodName, className, packageName) {
     showLoading();
-    
-    // First, search for the method
-    const params = new URLSearchParams();
-    params.append('name', methodName);
-    params.append('exact_match', 'true');  // Use exact matching for better precision
-    
-    fetch(`/methods/search?${params.toString()}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.methods.length > 0) {
-                // Try to find an exact match first
-                let method = null;
-                
-                if (className && packageName) {
-                    // Look for exact match with class and package
-                    method = data.methods.find(m => 
-                        m.name === methodName && 
-                        m.class_name === className && 
-                        m.package === packageName
-                    );
-                } else if (className) {
-                    // Look for match with just class name
-                    method = data.methods.find(m => 
-                        m.name === methodName && 
-                        m.class_name === className
-                    );
-                }
-                
-                // If no exact match but we have candidates, show a selection dialog
-                if (!method && data.methods.length > 1) {
-                    hideLoading();
-                    showMethodSelectionDialog(methodName, data.methods);
-                    return;
-                }
-                
-                // If no exact match, take the first one
-                if (!method) {
-                    method = data.methods[0];
-                }
-                
-                // Trace the found method
+    findMethod(methodName, className, packageName)
+        .then(method => {
+            if (method) {
                 traceMethod(method.id, method.name);
             } else {
                 hideLoading();

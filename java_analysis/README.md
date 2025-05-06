@@ -1,94 +1,63 @@
-# Java Project Analysis Tool
+# Static Method Call Analyzer
 
-This tool helps you analyze Java projects by extracting method signatures and tracing method call relationships. It uses JavaParser to parse Java source code and stores the analysis results in an SQLite database for efficient querying.
+A web application for searching and visualizing static method calls from a Java codebase using SQLite database.
 
 ## Features
 
-- Parse Java source code and extract method signatures
-- Track method call relationships with line numbers
-- Store analysis results in SQLite database
-- Search for methods by signature (name, return type, parameters)
-- Find method call relationships (callers and callees)
+- Search static method calls by:
+  - Caller class and method
+  - Static class and method
+- Visualize static method call relationships as an interactive graph
+- View detailed static method call information in a table
+- REST API endpoint for programmatic access
+- Identify static method usage patterns
 
 ## Prerequisites
 
-- Java 11 or later
-- Maven 3.6 or later
+- Python 3.8 or higher
+- SQLite database file (`java_analysis.db`) containing method call data
 
-## Building the Project
+## Installation
 
-```bash
-mvn clean package
-```
-
-This will create a JAR file in the `target` directory.
+1. Clone the repository
+2. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
-1. Run the application with a Java project directory as argument:
+1. Make sure your `java_analysis.db` file is in the same directory as `app.py`
+2. Run the application:
+   ```bash
+   python app.py
+   ```
+3. Open your web browser and navigate to `http://localhost:5000`
+
+## API Endpoints
+
+- `GET /api/method_calls`: Returns static method calls in JSON format
+  - Query parameters:
+    - `caller_class`: Filter by caller class name
+    - `caller_method`: Filter by caller method name
+    - `called_class`: Filter by static class name
+    - `called_method`: Filter by static method name
+
+## Example API Usage
 
 ```bash
-java -jar target/java-analysis-1.0-SNAPSHOT.jar /path/to/java/project
+curl "http://localhost:5000/api/method_calls?called_class=Helper&called_method=helperMethod"
 ```
 
-2. The application will analyze the project and populate the SQLite database.
+## Development
 
-3. Use the interactive menu to:
-   - Search for methods by signature
-   - Find method call relationships
-   - Exit the application
+The application is built using:
+- Flask for the web server
+- SQLAlchemy for database models
+- Pandas for data manipulation
+- Plotly for interactive visualizations
+- Bootstrap for the UI
 
-## Database Schema
+## License
 
-The SQLite database (`java_analysis.db`) contains three main tables:
-
-1. `classes`: Stores class information
-   - package_name
-   - class_name
-   - source_code
-   - file_path
-
-2. `methods`: Stores method information
-   - class_id (foreign key to classes)
-   - method_name
-   - return_type
-   - parameters
-   - is_static
-   - is_public
-
-3. `method_calls`: Stores method call relationships
-   - caller_method_id (foreign key to methods)
-   - called_method_id (foreign key to methods)
-   - line_number
-
-## Example Queries
-
-1. Find all public methods in a specific package:
-```sql
-SELECT m.method_name, m.return_type, m.parameters
-FROM methods m
-JOIN classes c ON m.class_id = c.id
-WHERE c.package_name = 'com.example.package'
-AND m.is_public = 1;
-```
-
-2. Find all methods that call a specific method:
-```sql
-SELECT c1.package_name, c1.class_name, m1.method_name, m1.parameters
-FROM method_calls mc
-JOIN methods m1 ON mc.caller_method_id = m1.id
-JOIN methods m2 ON mc.called_method_id = m2.id
-JOIN classes c1 ON m1.class_id = c1.id
-WHERE m2.method_name = 'targetMethod';
-```
-
-## Limitations
-
-- The tool currently only analyzes Java source files (`.java`)
-- Method resolution may not work correctly for complex inheritance scenarios
-- External library calls are not fully resolved
-- The analysis is performed at the source code level, not the bytecode level
-
-## Contributing
-
-Feel free to submit issues and enhancement requests! 
+MIT 

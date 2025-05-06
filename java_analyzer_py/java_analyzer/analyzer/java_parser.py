@@ -3,7 +3,7 @@ import javalang
 from javalang.tree import ClassDeclaration, MethodDeclaration, MethodInvocation, FieldDeclaration, Import
 from ..database import (
     add_class, get_class, add_method, get_method, add_method_call, 
-    add_import, get_imports_by_class, add_field, update_method_call_resolution,
+    add_import, get_imports_by_class, add_field,
     get_all_classes, get_fields_by_class, get_methods_by_class
 )
 
@@ -165,15 +165,28 @@ class JavaAnalyzer:
                         
                         # Add fields
                         for _, field_node in tree.filter(FieldDeclaration):
-                            for declarator in field_node.declarators:
-                                is_static = 'static' in field_node.modifiers
-                                field_type = field_node.type.name if hasattr(field_node.type, 'name') else str(field_node.type)
-                                add_field(
-                                    class_id=class_id,
-                                    name=declarator.name,
-                                    type_name=field_type,
-                                    is_static=is_static
-                                )
+                            for declarator in getattr(field_node, 'declarators', []):
+                                is_static = 'static' in getattr(field_node, 'modifiers', [])
+                                # Safely get the field type as string
+                                field_type = None
+                                try:
+                                    if hasattr(field_node, 'type') and field_node.type:
+                                        if hasattr(field_node.type, 'name'):
+                                            field_type = field_node.type.name
+                                        else:
+                                            field_type = str(field_node.type)
+                                    else:
+                                        field_type = "Unknown"
+                                    field_name = getattr(declarator, 'name', None)
+                                    if field_name is not None:
+                                        add_field(
+                                            class_id=class_id,
+                                            name=field_name,
+                                            type_name=field_type,
+                                            is_static=is_static
+                                        )
+                                except Exception as field_exc:
+                                    print(f"Error parsing field in {file_path}: {field_exc}")
                         
                         # Add methods
                         for _, method_node in node.filter(MethodDeclaration):
@@ -264,79 +277,42 @@ class JavaAnalyzer:
         """Process a method invocation node"""
         called_method = call_node.member
         line_number = call_node.position.line if call_node.position else None
-        
         # Determine the called class
         called_class = None
-        
-        # If it's a qualified method call like obj.method() or Class.method()
         if call_node.qualifier:
             called_class = call_node.qualifier
-        
-        # Add the call to the database
-        call_id = add_method_call(
+        # Add the call to the database (no resolution)
+        add_method_call(
             caller_method_id=caller_method_id,
             called_class=called_class,
             called_method=called_method,
             line_number=line_number
         )
-        
-        # Try to resolve the call
-        resolved_method_id = self.resolve_method_call(
-            call_node, class_id, caller_class_name, imports
-        )
-        
-        if resolved_method_id:
-            update_method_call_resolution(call_id, resolved_method_id)
             
     def process_constructor_call(self, constructor_node, caller_method_id, class_id, caller_class_name, imports):
         """Process a constructor call node"""
         line_number = constructor_node.position.line if constructor_node.position else None
-        
-        # Get the class being constructed
         called_class = constructor_node.type.name
-        
-        # Add the call to the database
-        call_id = add_method_call(
+        add_method_call(
             caller_method_id=caller_method_id,
             called_class=called_class,
-            called_method="<init>",  # Special name for constructors
+            called_method="<init>",
             line_number=line_number
         )
-        
-        # Try to resolve the constructor
-        resolved_method_id = self.resolve_constructor_call(
-            constructor_node, class_id, caller_class_name, imports
-        )
-        
-        if resolved_method_id:
-            update_method_call_resolution(call_id, resolved_method_id)
             
     def process_method_reference(self, ref_node, caller_method_id, class_id, caller_class_name, imports):
         """Process a method reference node"""
         line_number = ref_node.position.line if ref_node.position else None
-        
-        # Get the method being referenced
         called_method = ref_node.method
         called_class = None
-        
         if ref_node.qualifier:
             called_class = ref_node.qualifier
-            
-        # Add the call to the database
-        call_id = add_method_call(
+        add_method_call(
             caller_method_id=caller_method_id,
             called_class=called_class,
             called_method=called_method,
             line_number=line_number
         )
-        
-        # Try to resolve the method reference
-        resolved_method_id = self.resolve_method_reference(
-            ref_node, class_id, caller_class_name, imports
-        )
-        
-        if resolved_method_id:
-            update_method_call_resolution(call_id, resolved_method_id)
             
     def process_lambda_expression(self, lambda_node, caller_method_id, class_id, caller_class_name, imports):
         """Process a lambda expression node"""
@@ -607,7 +583,8 @@ class JavaAnalyzer:
         """
         if len(method_params) != len(arg_types):
             return 0
-            
+        if len(method_params) == 0:
+            return 1.0  # Both are empty, perfect match
         score = 0
         for method_param, arg_type in zip(method_params, arg_types):
             if method_param == arg_type:
@@ -616,7 +593,6 @@ class JavaAnalyzer:
                 score += 0.8
             elif self.is_convertible(arg_type, method_param):
                 score += 0.5
-                
         return score / len(method_params)
         
     def is_subtype(self, type1, type2):
@@ -733,7 +709,7 @@ class JavaAnalyzer:
         fields = get_fields_by_class(class_id)
         for field in fields:
             if field['name'] == field_name:
-                return field['type_name']
+                return field['type']
                 
         # If not found, check superclass
         class_info = get_class(class_id)

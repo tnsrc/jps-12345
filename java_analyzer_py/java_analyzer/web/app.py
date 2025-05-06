@@ -97,6 +97,8 @@ def trace_method(method_id):
         method_info = get_method(method_id)
         
         trace = get_full_method_call_trace(method_id)
+
+        print(trace)
         
         # Add the method's own line number to the root trace node
         if trace and method_info:

@@ -301,45 +301,73 @@ public class JavaSourceParser {
                                                 if (fullName != null) {
                                                     return fullName;
                                                 }
-                                                // Check if the class is in the same package
-                                                if (classCache.containsKey(packageName + "." + name)) {
-                                                    return packageName + "." + name;
-                                                }
-                                                // Check if the class is in the imports
-                                                for (String importedClass : importMap.values()) {
-                                                    if (importedClass.endsWith("." + name)) {
-                                                        return importedClass;
+                                                // Try to resolve variable to class type
+                                                try {
+                                                    com.github.javaparser.resolution.types.ResolvedType resolvedType = ((NameExpr) scope).calculateResolvedType();
+                                                    if (resolvedType.isReferenceType()) {
+                                                        String qualifiedName = resolvedType.asReferenceType().getQualifiedName();
+                                                        if (qualifiedName != null) {
+                                                            return qualifiedName;
+                                                        }
                                                     }
+                                                } catch (Exception e) {
+                                                    // Ignore resolution errors
                                                 }
-                                                // Default to the current package
-                                                return packageName + "." + name;
+                                                // If not resolved, do NOT return the variable name
+                                                return null;
                                             }
                                             return classKey;
                                         })
-                                        .orElse(classKey);
+                                        .orElseGet(() -> {
+                                            // For unscoped static method calls, try to resolve the declaring class
+                                            try {
+                                                // First check if it's a static import
+                                                String fullName = importMap.get(n.getNameAsString());
+                                                if (fullName != null) {
+                                                    return fullName.substring(0, fullName.lastIndexOf('.'));
+                                                }
+                                                
+                                                // Try to resolve using symbol solver
+                                                ResolvedMethodDeclaration resolvedMethod = n.resolve();
+                                                if (resolvedMethod != null) {
+                                                    return resolvedMethod.getClassName();
+                                                }
+                                                
+                                                // If we can't resolve it, return null to avoid incorrect class assignment
+                                                return null;
+                                            } catch (Exception e) {
+                                                logger.debug("Failed to resolve static method: " + n.getNameAsString(), e);
+                                                return null;
+                                            }
+                                        });
 
-                                // Store the called method first if it doesn't exist in the cache
-                                String calledMethodKey = calledClass + "." + calledMethod + "[" + calledParameters + "]";
-                                if (!methodCache.containsKey(calledMethodKey)) {
-                                    if (!classCache.containsKey(calledClass)) {
-                                        String packageName = calledClass.substring(0, calledClass.lastIndexOf('.'));
-                                        String className = calledClass.substring(calledClass.lastIndexOf('.') + 1);
-                                        storeClass(packageName, className, "", filePath.toString(), false, false, null);
+                                // Only store class if calledClass is a real class name (contains a dot)
+                                if (calledClass != null && calledClass.contains(".")) {
+                                    String calledMethodKey = calledClass + "." + calledMethod + "[" + calledParameters + "]";
+                                    if (!methodCache.containsKey(calledMethodKey)) {
+                                        if (!classCache.containsKey(calledClass)) {
+                                            String packageName = calledClass.substring(0, calledClass.lastIndexOf('.'));
+                                            String className = calledClass.substring(calledClass.lastIndexOf('.') + 1);
+                                            storeClass(packageName, className, "", filePath.toString(), false, false, null);
+                                        }
+                                        // Check if this is a static method call
+                                        boolean isStatic = n.getScope().isEmpty() && 
+                                            (importMap.containsKey(calledMethod) || 
+                                             n.getNameAsString().equals(calledMethod));
+                                        storeMethod(calledClass, calledMethod, "void", calledParameters, calledParameters,
+                                                isStatic, true, false, false, false, false);
                                     }
-                                    
-                                    storeMethod(calledClass, calledMethod, "void", calledParameters, calledParameters,
-                                            false, true, false, false, false, false);
-                                }
 
-                                // Store the method call with context
-                                storeMethodCall(
-                                    callerClass, callerMethod, callerParameters,
-                                    calledClass, calledMethod, calledParameters,
-                                    n.getBegin().get().line, "this", "direct",
-                                    inTryBlock, inCatchBlock, inFinallyBlock,
-                                    inLoop, loopType, inConditional, conditionalType,
-                                    filePath.toString()
-                                );
+                                    // Store the method call with context
+                                    storeMethodCall(
+                                        callerClass, callerMethod, callerParameters,
+                                        calledClass, calledMethod, calledParameters,
+                                        n.getBegin().get().line, "this", "direct",
+                                        inTryBlock, inCatchBlock, inFinallyBlock,
+                                        inLoop, loopType, inConditional, conditionalType,
+                                        filePath.toString()
+                                    );
+                                }
                             }
                         }, null);
                     });

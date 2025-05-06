@@ -211,31 +211,19 @@ def get_methods_by_class(class_id):
     return [dict(row) for row in results]
 
 # Method call operations
-def add_method_call(caller_method_id, called_class, called_method, called_signature=None, line_number=None, resolved_method_id=None):
+def add_method_call(caller_method_id, called_class, called_method, called_signature=None, line_number=None):
     """Add a method call to the database"""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """INSERT INTO method_calls (caller_method_id, called_class, called_method, called_signature, line_number, resolved_method_id) 
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (caller_method_id, called_class, called_method, called_signature, line_number, resolved_method_id)
+        """INSERT INTO method_calls (caller_method_id, called_class, called_method, called_signature, line_number) 
+           VALUES (?, ?, ?, ?, ?)""",
+        (caller_method_id, called_class, called_method, called_signature, line_number)
     )
     call_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return call_id
-
-def update_method_call_resolution(call_id, resolved_method_id):
-    """Update the resolution of a method call"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """UPDATE method_calls SET resolved_method_id = ? WHERE id = ?""",
-        (resolved_method_id, call_id)
-    )
-    conn.commit()
-    conn.close()
-    return cursor.rowcount > 0
 
 def get_method_calls(caller_method_id):
     """Get all method calls made by a method"""
@@ -251,11 +239,12 @@ def get_method_calls(caller_method_id):
 
 def get_method_call_stack(method_id, visited=None):
     """Get the method call stack for a method (direct calls only)"""
+    from . import get_class, get_fields_by_class  # Import here to avoid circular import at module level
     if visited is None:
         visited = set()
     
     if method_id in visited:
-        return []  # Prevent infinite recursion
+        return None  # Prevent infinite recursion, return None not []
     
     visited.add(method_id)
     
@@ -265,42 +254,89 @@ def get_method_call_stack(method_id, visited=None):
     # Get the method info
     cursor.execute("SELECT * FROM methods WHERE id = ?", (method_id,))
     method = cursor.fetchone()
+    if method:
+        method = dict(method)
     
     if not method:
         conn.close()
-        return []
+        return None  # Return None if not found
     
     # Get the class info
     cursor.execute("SELECT * FROM classes WHERE id = ?", (method['class_id'],))
     class_info = cursor.fetchone()
+    if class_info:
+        class_info = dict(class_info)
     
     # Get all method calls made by this method
     cursor.execute("""
-        SELECT mc.*, 
-               m.name as called_method_name, 
-               c.name as called_class_name,
-               c.package as called_package
+        SELECT mc.*
         FROM method_calls mc
-        LEFT JOIN methods m ON mc.resolved_method_id = m.id
-        LEFT JOIN classes c ON m.class_id = c.id
         WHERE mc.caller_method_id = ?
     """, (method_id,))
     
     calls = cursor.fetchall()
     conn.close()
     
-    # Build the call stack
     calls_info = []
     for call in calls:
         call_dict = dict(call)
-        
-        # If the call was resolved to a method in our database
-        if call_dict['resolved_method_id']:
-            child_calls = get_method_call_stack(call_dict['resolved_method_id'], visited)
-            call_dict['children'] = child_calls
-        else:
-            call_dict['children'] = []
-            
+        call_dict['children'] = []  # No recursion by resolved_method_id
+        called_class_name = call_dict.get('called_class')
+        called_package = None
+        resolved = False
+        # Try to resolve called_class_name to a real class
+        if called_class_name:
+            # 1. Try direct class lookup
+            class_info_lookup = get_class(name=called_class_name)
+            if class_info_lookup and isinstance(class_info_lookup, dict):
+                called_package = class_info_lookup.get('package')
+                called_class_name = f"{called_package}.{called_class_name}" if called_package else called_class_name
+                resolved = True
+            # 2. If not found, try to resolve as a field (instance variable)
+            if not resolved and method and 'class_id' in method:
+                fields = get_fields_by_class(method['class_id'])
+                found_type = None
+                found_package = None
+                for field in fields:
+                    if field['name'] == call_dict['called_class']:
+                        found_type = field['type']
+                        # Try to get package for this type
+                        class_info2 = get_class(name=found_type)
+                        if class_info2 and isinstance(class_info2, dict):
+                            found_package = class_info2.get('package')
+                        break
+                if found_type:
+                    called_class_name = f"{found_package}.{found_type}" if found_package else found_type
+                    called_package = found_package
+                    resolved = True
+            # 3. If still not found, try to resolve from local variable declaration in method source
+            if not resolved and method and class_info:
+                file_path = class_info.get('file_path')
+                if file_path and method.get('start_line'):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                        start = max(0, (method['start_line'] or 1) - 1)
+                        end = min(len(lines), start + 30)
+                        for i in range(start, end):
+                            line = lines[i].strip()
+                            import re
+                            m = re.match(r'(\w+)\s+' + re.escape(call_dict['called_class']) + r'\s*[;=]', line)
+                            if m:
+                                found_type = m.group(1)
+                                class_info2 = get_class(name=found_type)
+                                if class_info2 and isinstance(class_info2, dict):
+                                    found_package = class_info2.get('package')
+                                break
+                        if found_type:
+                            called_class_name = f"{found_package}.{found_type}" if found_package else found_type
+                            called_package = found_package
+                            resolved = True
+                    except Exception:
+                        pass
+        call_dict['called_class_name'] = called_class_name
+        call_dict['called_package'] = called_package
+        call_dict['method_id'] = None  # No resolved method id
         calls_info.append(call_dict)
     
     return {

@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script id="available-databases" type="application/json">{{ databases|tojson }}</script>
+<script>
+const AVAILABLE_DATABASES = JSON.parse(document.getElementById('available-databases').textContent);
+
+$(document).ready(function() {
+    // Load available databases
+    function loadDatabases() {
+        const select = $('#databaseSelect');
+        select.empty().append('<option value="">Select Database...</option>');
+        AVAILABLE_DATABASES.forEach(db => {
+            select.append(`<option value="${db}">${db}</option>`);
+        });
+    }
+
+    // Load method classes
+    function loadMethodClasses(classes) {
+        const select = $('#methodClassSelect');
+        select.empty().append('<option value="">Select Class...</option>');
+        
+        if (!classes || classes.length === 0) {
+            return;
+        }
+        
+        // Group classes by package
+        const groupedClasses = {};
+        classes.forEach(cls => {
+            if (!groupedClasses[cls.package]) {
+                groupedClasses[cls.package] = [];
+            }
+            groupedClasses[cls.package].push(cls);
+        });
+
+        // Add optgroups for each package
+        Object.entries(groupedClasses).forEach(([package, classes]) => {
+            const optgroup = $('<optgroup>').attr('label', package);
+            classes.forEach(cls => {
+                // Get methods for this class
+                $.get('/api/methods', { 
+                    package: cls.package, 
+                    class: cls.class 
+                }, function(methods) {
+                    methods.forEach(method => {
+                        const isStatic = method.is_static ? 'static ' : '';
+                        optgroup.append(`
+                            <option 
+                                value="${cls.package}.${cls.class}.${method.method}${method.parameters}"
+                                data-package="${cls.package}"
+                                data-class="${cls.class}"
+                                data-method="${method.method}"
+                                data-parameters='${method.parameters}'
+                            >
+                                ${cls.class}.${isStatic}${method.method}${method.parameters}
+                            </option>
+                        `);
+                    });
+                });
+            });
+            select.append(optgroup);
+        });
+    }
+
+    // Handle method search with autocomplete
+    let searchTimeout;
+    $('#methodSearch').on('input', function() {
+        clearTimeout(searchTimeout);
+        const query = $(this).val();
+        
+        if (query.length < 2) {
+            $('.autocomplete-suggestions').hide();
+            return;
+        }
+
+        searchTimeout = setTimeout(() => {
+            $.get('/api/search', { q: query }, function(results) {
+                const suggestions = $('.autocomplete-suggestions');
+                suggestions.empty();
+                
+                results.forEach(result => {
+                    const methodSig = `${result.package}.${result.class}.${result.method}${result.parameters}`;
+                    const isStatic = result.is_static ? 'static ' : '';
+                    suggestions.append(`
+                        <div class="autocomplete-suggestion" 
+                             data-package="${result.package}"
+                             data-class="${result.class}"
+                             data-method="${result.method}"
+                             data-parameters="${result.parameters}">
+                            ${isStatic}${result.method}${result.parameters}
+                            <small class="text-muted">${result.package}.${result.class}</small>
+                        </div>
+                    `);
+                });
+                
+                suggestions.show();
+            });
+        }, 300);
+    });
+
+    // Handle suggestion click
+    $(document).on('click', '.autocomplete-suggestion', function() {
+        const packageName = $(this).data('package');
+        const className = $(this).data('class');
+        const method = $(this).data('method');
+        const parameters = $(this).data('parameters');
+        
+        $('#methodSearch').val(`${packageName}.${className}.${method}${parameters}`);
+        $('.autocomplete-suggestions').hide();
+        // Debug: log what is being sent
+        console.log('CallStack params:', packageName, className, method, parameters);
+        loadCallStack(packageName, className, method, parameters);
+    });
+
+    // Handle search on Enter
+    $('#methodSearch').on('keypress', function(e) {
+        if (e.which === 13) {
+            const value = $(this).val();
+            // Try to extract parameters as in the suggestion
+            const match = value.match(/^(.*)\.(.*)\.(.*)(\[.*\])$/);
+            if (match) {
+                const packageName = match[1];
+                const className = match[2];
+                const method = match[3];
+                const parameters = match[4];
+                loadCallStack(packageName, className, method, parameters);
+            } else {
+                // fallback: old logic
+                const parts = value.split('.');
+                if (parts.length >= 3) {
+                    const packageName = parts.slice(0, -2).join('.');
+                    const className = parts[parts.length - 2];
+                    const methodWithParams = parts[parts.length - 1];
+                    const method = methodWithParams.split('(')[0];
+                    const parameters = `[${methodWithParams.split('(')[1]}`;
+                    loadCallStack(packageName, className, method, parameters);
+                }
+            }
+        }
+    });
+
+    // Load method call stack
+    function loadCallStack(package, className, method, parameters) {
+        const direction = $('#directionSelect').val() || 'out';
+        $.get('/api/call-stack', {
+            package: package,
+            class: className,
+            method: method,
+            parameters: parameters,
+            direction: direction
+        }, function(results) {
+            const container = $('#methodCallStack');
+            container.empty();
+
+            if (results.length === 0) {
+                container.append('<div class="alert alert-info">No call stack found</div>');
+                return;
+            }
+
+            // Group by direction if both
+            if (direction === 'both') {
+                const callers = results.filter(r => r.direction === 'caller');
+                const callees = results.filter(r => r.direction === 'callee');
+                if (callers.length > 0) {
+                    container.append('<h5>Callers (Incoming)</h5>');
+                    callers.forEach(method => {
+                        container.append(renderMethodItem(method, 'caller'));
+                    });
+                }
+                if (callees.length > 0) {
+                    container.append('<h5>Callees (Outgoing)</h5>');
+                    // Group by depth for callees
+                    const groupedResults = {};
+                    callees.forEach(result => {
+                        if (!groupedResults[result.depth]) {
+                            groupedResults[result.depth] = [];
+                        }
+                        groupedResults[result.depth].push(result);
+                    });
+                    Object.entries(groupedResults).forEach(([depth, methods]) => {
+                        const depthContainer = $('<div>').addClass('mb-4');
+                        methods.forEach(method => {
+                            depthContainer.append(renderMethodItem(method, 'callee'));
+                        });
+                        container.append(depthContainer);
+                    });
+                }
+            } else if (direction === 'in') {
+                // Only show callers
+                results.forEach(method => {
+                    container.append(renderMethodItem(method, 'caller'));
+                });
+            } else {
+                // Only show callees (default)
+                // Group methods by depth
+                const groupedResults = {};
+                results.forEach(result => {
+                    if (!groupedResults[result.depth]) {
+                        groupedResults[result.depth] = [];
+                    }
+                    groupedResults[result.depth].push(result);
+                });
+                Object.entries(groupedResults).forEach(([depth, methods]) => {
+                    const depthContainer = $('<div>').addClass('mb-4');
+                    methods.forEach(method => {
+                        depthContainer.append(renderMethodItem(method, 'callee'));
+                    });
+                    container.append(depthContainer);
+                });
+            }
+        });
+    }
+
+    // Render a method item, visually distinguishing callers/callees
+    function renderMethodItem(method, direction) {
+        const isStatic = method.is_static ? 'static ' : '';
+        const dirLabel = direction === 'caller' ? '<span class="badge bg-info">Caller</span>' : '';
+        return `
+            <div class="method-item">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${isStatic}${method.method}${method.parameters}</strong> ${dirLabel}
+                        <div class="method-details">
+                            ${method.package}.${method.class} (line ${method.line_number})
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary trace-btn"
+                            data-package="${method.package}"
+                            data-class="${method.class}"
+                            data-method="${method.method}"
+                            data-parameters="${method.parameters}">
+                        Trace
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    // Handle trace button click
+    $(document).on('click', '.trace-btn', function() {
+        const package = $(this).data('package');
+        const className = $(this).data('class');
+        const method = $(this).data('method');
+        const parameters = $(this).data('parameters');
+        
+        loadCallStack(package, className, method, parameters);
+    });
+
+    // Handle reset button
+    $('#resetBtn').click(function() {
+        $('#methodSearch').val('');
+        $('#methodCallStack').empty();
+    });
+
+    // Handle database selection
+    $('#databaseSelect').change(function() {
+        const selectedDb = $(this).val();
+        if (selectedDb) {
+            // Show loading state
+            $('#methodClassSelect').prop('disabled', true).html('<option>Loading...</option>');
+            
+            // Update database connection
+            $.ajax({
+                url: '/api/change-db',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ database: selectedDb }),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        loadMethodClasses(response.classes);
+                    } else {
+                        alert('Failed to switch database: ' + response.error);
+                    }
+                },
+                error: function(xhr) {
+                    alert('Failed to switch database: ' + (xhr.responseJSON?.error || 'Unknown error'));
+                },
+                complete: function() {
+                    $('#methodClassSelect').prop('disabled', false);
+                }
+            });
+        } else {
+            $('#methodClassSelect').empty().append('<option value="">Select Class...</option>');
+        }
+    });
+
+    // Handle analyze button
+    $('#analyzeBtn').click(function() {
+        const javaDir = $('#javaDir').val();
+        const resetDb = $('#resetDb').is(':checked');
+        
+        if (!javaDir) {
+            alert('Please enter a Java source directory');
+            return;
+        }
+
+        $.post('/api/analyze', {
+            javaDir: javaDir,
+            resetDb: resetDb
+        }, function(response) {
+            if (response.status === 'success') {
+                loadMethodClasses(response.classes);
+                alert('Analysis completed successfully');
+            } else {
+                alert('Analysis failed: ' + response.error);
+            }
+        });
+    });
+
+    // Handle class selection change
+    $('#methodClassSelect').change(function() {
+        const selected = $(this).find('option:selected');
+        const packageName = selected.data('package');
+        const className = selected.data('class');
+        const method = selected.data('method');
+        const parameters = selected.data('parameters');
+        if (packageName && className && method && parameters !== undefined) {
+            loadCallStack(packageName, className, method, parameters);
+        }
+    });
+
+    // Handle direction select change
+    $('#directionSelect').change(function() {
+        // Reload call stack for current selection
+        const value = $('#methodClassSelect').val();
+        if (value) {
+            const selected = $('#methodClassSelect').find('option:selected');
+            const packageName = selected.data('package');
+            const className = selected.data('class');
+            const method = selected.data('method');
+            const parameters = selected.data('parameters');
+            loadCallStack(packageName, className, method, parameters);
+        }
+    });
+
+    // Handle Show All Callers button
+    $('#showCallersBtn').click(function() {
+        const value = $('#methodClassSelect').val();
+        if (value) {
+            const selected = $('#methodClassSelect').find('option:selected');
+            const packageName = selected.data('package');
+            const className = selected.data('class');
+            const method = selected.data('method');
+            const parameters = selected.data('parameters');
+            $.get('/api/callers', {
+                package: packageName,
+                class: className,
+                method: method,
+                parameters: parameters
+            }, function(results) {
+                const container = $('#methodCallStack');
+                container.empty();
+                if (results.length === 0) {
+                    container.append('<div class="alert alert-info">No callers found</div>');
+                    return;
+                }
+                container.append('<h5>All Callers</h5>');
+                results.forEach(method => {
+                    container.append(renderMethodItem(method, 'caller'));
+                });
+            });
+        }
+    });
+
+    // Initial load
+    loadDatabases();
+});
+</script>
+
+<div class="row mb-3">
+    <div class="col-md-4">
+        <label for="directionSelect" class="form-label">Call Stack Direction</label>
+        <select id="directionSelect" class="form-select">
+            <option value="out">Outgoing (Callees)</option>
+            <option value="in">Incoming (Callers)</option>
+            <option value="both">Both</option>
+        </select>
+    </div>
+    <div class="col-md-4">
+        <button id="showCallersBtn" class="btn btn-outline-secondary mt-4">Show All Callers</button>
+    </div>
+</div>
+{% endblock %} 
