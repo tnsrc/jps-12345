@@ -1,0 +1,4 @@
+com/jps/analysis/query/MethodQueryTest.class
+com/jps/analysis/parser/JavaSourceParserTest.class
+com/jps/analysis/cli/MainTest.class
+com/jps/analysis/db/DatabaseManagerTest.class

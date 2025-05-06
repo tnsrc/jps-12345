@@ -1,0 +1,11 @@
+com/jps/analysis/parser/JavaSourceParser$1$1.class
+com/jps/analysis/parser/JavaSourceParser$1.class
+com/jps/analysis/query/MethodQuery$MethodInfo.class
+com/jps/analysis/query/MethodQuery.class
+com/jps/analysis/visualization/MethodCallVisualizer.class
+com/jps/analysis/visualization/MethodCallVisualizer$MethodComplexity.class
+com/jps/analysis/db/DatabaseManager.class
+com/jps/analysis/Main.class
+com/jps/analysis/query/MethodQuery$MethodCall.class
+com/jps/analysis/parser/JavaSourceParser.class
+com/jps/analysis/cli/Main.class

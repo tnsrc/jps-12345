@@ -4,7 +4,7 @@ from javalang.tree import ClassDeclaration, MethodDeclaration, MethodInvocation,
 from ..database import (
     add_class, get_class, add_method, get_method, add_method_call, 
     add_import, get_imports_by_class, add_field, update_method_call_resolution,
-    get_all_classes
+    get_all_classes, get_fields_by_class, get_methods_by_class
 )
 
 class JavaAnalyzer:
@@ -243,34 +243,157 @@ class JavaAnalyzer:
                             
                             # Process method invocations
                             for _, call_node in method_node.filter(MethodInvocation):
-                                called_method = call_node.member
-                                line_number = call_node.position.line if call_node.position else None
-                                
-                                # Determine the called class
-                                called_class = None
-                                
-                                # If it's a qualified method call like obj.method() or Class.method()
-                                if call_node.qualifier:
-                                    called_class = call_node.qualifier
-                                
-                                # Add the call to the database
-                                call_id = add_method_call(
-                                    caller_method_id=method_id,
-                                    called_class=called_class,
-                                    called_method=called_method,
-                                    line_number=line_number
-                                )
-                                
-                                # Try to resolve the call
-                                resolved_method_id = self.resolve_method_call(
-                                    call_node, class_id, full_class_name, imports
-                                )
-                                
-                                if resolved_method_id:
-                                    update_method_call_resolution(call_id, resolved_method_id)
+                                self.process_method_call(call_node, method_id, class_id, full_class_name, imports)
+                            
+                            # Process constructor calls
+                            for _, constructor_node in method_node.filter(javalang.tree.ClassCreator):
+                                self.process_constructor_call(constructor_node, method_id, class_id, full_class_name, imports)
+                            
+                            # Process method references
+                            for _, ref_node in method_node.filter(javalang.tree.MethodReference):
+                                self.process_method_reference(ref_node, method_id, class_id, full_class_name, imports)
+                            
+                            # Process lambda expressions
+                            for _, lambda_node in method_node.filter(javalang.tree.LambdaExpression):
+                                self.process_lambda_expression(lambda_node, method_id, class_id, full_class_name, imports)
                 
             except Exception as e:
                 print(f"Error parsing {file_path}: {str(e)}")
+                
+    def process_method_call(self, call_node, caller_method_id, class_id, caller_class_name, imports):
+        """Process a method invocation node"""
+        called_method = call_node.member
+        line_number = call_node.position.line if call_node.position else None
+        
+        # Determine the called class
+        called_class = None
+        
+        # If it's a qualified method call like obj.method() or Class.method()
+        if call_node.qualifier:
+            called_class = call_node.qualifier
+        
+        # Add the call to the database
+        call_id = add_method_call(
+            caller_method_id=caller_method_id,
+            called_class=called_class,
+            called_method=called_method,
+            line_number=line_number
+        )
+        
+        # Try to resolve the call
+        resolved_method_id = self.resolve_method_call(
+            call_node, class_id, caller_class_name, imports
+        )
+        
+        if resolved_method_id:
+            update_method_call_resolution(call_id, resolved_method_id)
+            
+    def process_constructor_call(self, constructor_node, caller_method_id, class_id, caller_class_name, imports):
+        """Process a constructor call node"""
+        line_number = constructor_node.position.line if constructor_node.position else None
+        
+        # Get the class being constructed
+        called_class = constructor_node.type.name
+        
+        # Add the call to the database
+        call_id = add_method_call(
+            caller_method_id=caller_method_id,
+            called_class=called_class,
+            called_method="<init>",  # Special name for constructors
+            line_number=line_number
+        )
+        
+        # Try to resolve the constructor
+        resolved_method_id = self.resolve_constructor_call(
+            constructor_node, class_id, caller_class_name, imports
+        )
+        
+        if resolved_method_id:
+            update_method_call_resolution(call_id, resolved_method_id)
+            
+    def process_method_reference(self, ref_node, caller_method_id, class_id, caller_class_name, imports):
+        """Process a method reference node"""
+        line_number = ref_node.position.line if ref_node.position else None
+        
+        # Get the method being referenced
+        called_method = ref_node.method
+        called_class = None
+        
+        if ref_node.qualifier:
+            called_class = ref_node.qualifier
+            
+        # Add the call to the database
+        call_id = add_method_call(
+            caller_method_id=caller_method_id,
+            called_class=called_class,
+            called_method=called_method,
+            line_number=line_number
+        )
+        
+        # Try to resolve the method reference
+        resolved_method_id = self.resolve_method_reference(
+            ref_node, class_id, caller_class_name, imports
+        )
+        
+        if resolved_method_id:
+            update_method_call_resolution(call_id, resolved_method_id)
+            
+    def process_lambda_expression(self, lambda_node, caller_method_id, class_id, caller_class_name, imports):
+        """Process a lambda expression node"""
+        # Process any method calls within the lambda body
+        for _, call_node in lambda_node.filter(MethodInvocation):
+            self.process_method_call(call_node, caller_method_id, class_id, caller_class_name, imports)
+            
+        # Process any constructor calls within the lambda body
+        for _, constructor_node in lambda_node.filter(javalang.tree.ClassCreator):
+            self.process_constructor_call(constructor_node, caller_method_id, class_id, caller_class_name, imports)
+            
+        # Process any method references within the lambda body
+        for _, ref_node in lambda_node.filter(javalang.tree.MethodReference):
+            self.process_method_reference(ref_node, caller_method_id, class_id, caller_class_name, imports)
+            
+    def resolve_constructor_call(self, constructor_node, class_id, caller_class_name, imports):
+        """Resolve a constructor call to find the target constructor"""
+        # Similar to resolve_method_call but specialized for constructors
+        called_class = constructor_node.type.name
+        
+        # Try to resolve the class
+        target_class_name = self.resolve_class_from_imports(called_class, imports, class_id)
+        if not target_class_name:
+            target_class_name = called_class
+            
+        target_class_id = self.get_class_id(target_class_name)
+        if not target_class_id:
+            return None
+            
+        # Get all constructors for the class
+        methods = self.get_methods_by_class(target_class_id)
+        for method in methods:
+            if method['name'] == "<init>":  # Constructor name
+                # Check if parameter types match
+                method_params = self.parse_method_signature(method['signature'])
+                arg_types = [self.resolve_type(arg.type) for arg in constructor_node.arguments]
+                
+                if len(method_params) == len(arg_types):
+                    # Simple check - real IDEs do more sophisticated matching
+                    return method['id']
+                    
+        return None
+        
+    def resolve_method_reference(self, ref_node, class_id, caller_class_name, imports):
+        """Resolve a method reference to find the target method"""
+        # Similar to resolve_method_call but specialized for method references
+        method_name = ref_node.method
+        qualifier = ref_node.qualifier
+        
+        # Create a synthetic method invocation node
+        synthetic_call = javalang.tree.MethodInvocation(
+            qualifier=qualifier,
+            member=method_name,
+            arguments=[]  # Method references don't have arguments
+        )
+        
+        return self.resolve_method_call(synthetic_call, class_id, caller_class_name, imports)
     
     def get_class_id(self, full_class_name):
         """Get class ID from cache or database"""
@@ -306,78 +429,234 @@ class JavaAnalyzer:
     
     def resolve_method_call(self, call_node, class_id, caller_class_name, imports):
         """
-        Resolve a method call to find the target method
+        Resolve a method call to find the target method with improved accuracy.
+        Similar to how Java IDEs resolve method calls.
         
-        call_node: The method invocation node
-        class_id: The ID of the calling class
-        caller_class_name: The fully qualified name of the calling class
-        imports: List of imports for the calling class
+        Args:
+            call_node: The method invocation node
+            class_id: The ID of the calling class
+            caller_class_name: The fully qualified name of the calling class
+            imports: List of imports for the calling class
+            
+        Returns:
+            The ID of the resolved method, or None if not found
         """
         method_name = call_node.member
+        qualifier = call_node.qualifier
+        arguments = call_node.arguments
         
-        # If we have a qualifier, try to resolve it directly
-        if call_node.qualifier:
-            # First check if it's a reference to the current class
-            if call_node.qualifier == 'this':
-                # It's a call to the current class
-                called_class_name = caller_class_name
+        # Step 1: Determine the target class
+        target_class_name = None
+        
+        if qualifier:
+            if qualifier == 'this':
+                target_class_name = caller_class_name
+            elif qualifier == 'super':
+                # Get the superclass of the current class
+                class_info = get_class(class_id)
+                if class_info and class_info.get('superclass'):
+                    target_class_name = class_info['superclass']
             else:
-                # Try to find the class in imports
-                called_class_name = self.resolve_class_from_imports(call_node.qualifier, imports, class_id)
+                # Try to resolve the qualifier as a class name
+                target_class_name = self.resolve_class_from_imports(qualifier, imports, class_id)
                 
-                if not called_class_name:
-                    # It might be a fully qualified class name already
-                    called_class_name = call_node.qualifier
-            
-            if called_class_name:
-                # Create a method signature approximation
-                # This is not perfect since we don't know parameter types from the call
-                # Would need symbol table analysis for perfect resolution
-                signature = f"{method_name}("
-                if call_node.arguments:
-                    signature += "..."  # Just indicate there are arguments
-                signature += ")"
-                
-                # Try to find the method
-                class_id = self.get_class_id(called_class_name)
-                if class_id:
-                    # Get methods with this name from the class
-                    method = get_method(class_id=class_id, name=method_name)
-                    if method:
-                        return method['id']
-        
-        # If no qualifier, it could be a method in the current class or statically imported
+                # If not found in imports, check if it's a field in the current class
+                if not target_class_name:
+                    field_type = self.resolve_field_type(class_id, qualifier)
+                    if field_type:
+                        target_class_name = field_type
         else:
-            # First check if it's a method in the current class
-            class_id = self.get_class_id(caller_class_name)
-            if class_id:
-                method = get_method(class_id=class_id, name=method_name)
-                if method:
-                    return method['id']
-            
-            # Check for statically imported methods
-            if class_id in self.static_imports:
-                for static_import_path in self.static_imports[class_id]:
-                    # For a static import like 'import static package.Class.method'
-                    # or 'import static package.Class.*'
-                    if '.' in static_import_path:
-                        # Split the path to get the class
-                        potential_class_path = static_import_path
-                        
-                        # If the static import ends with the method name,
-                        # then it's a direct static import of that method
-                        if static_import_path.endswith('.' + method_name):
-                            # Strip the method name to get the class
-                            potential_class_path = static_import_path.rsplit('.', 1)[0]
-                        
-                        potential_class_id = self.get_class_id(potential_class_path)
-                        if potential_class_id:
-                            # Look for a static method with this name
-                            static_method = get_method(class_id=potential_class_id, name=method_name)
-                            if static_method:
-                                return static_method['id']
+            # No qualifier - could be a method in the current class or a static import
+            target_class_name = caller_class_name
         
+        if not target_class_name:
+            return None
+            
+        # Step 2: Get the target class ID
+        target_class_id = self.get_class_id(target_class_name)
+        if not target_class_id:
+            return None
+            
+        # Step 3: Build method signature based on arguments
+        arg_types = []
+        for arg in arguments:
+            if hasattr(arg, 'type'):
+                arg_type = self.resolve_type(arg.type)
+            else:
+                # For complex expressions, we'll need to infer the type
+                arg_type = self.infer_expression_type(arg, class_id, imports)
+            arg_types.append(arg_type)
+            
+        # Step 4: Find matching methods in the target class
+        methods = get_methods_by_class(target_class_id)
+        best_match = None
+        best_score = 0
+        
+        for method in methods:
+            if method['name'] != method_name:
+                continue
+                
+            # Get method parameter types
+            method_params = self.parse_method_signature(method['signature'])
+            
+            # Calculate match score based on parameter types
+            score = self.calculate_method_match_score(method_params, arg_types)
+            
+            if score > best_score:
+                best_score = score
+                best_match = method
+                
+        if best_match:
+            return best_match['id']
+            
+        # Step 5: If no match found, check superclasses and interfaces
+        class_info = get_class(target_class_id)
+        if class_info:
+            # Check superclass
+            if class_info.get('superclass'):
+                superclass_id = self.get_class_id(class_info['superclass'])
+                if superclass_id:
+                    resolved_id = self.resolve_method_call(call_node, superclass_id, 
+                                                         class_info['superclass'], imports)
+                    if resolved_id:
+                        return resolved_id
+                        
+            # Check interfaces
+            for interface in class_info.get('interfaces', []):
+                interface_id = self.get_class_id(interface)
+                if interface_id:
+                    resolved_id = self.resolve_method_call(call_node, interface_id, 
+                                                         interface, imports)
+                    if resolved_id:
+                        return resolved_id
+                        
         return None
+        
+    def resolve_type(self, type_node):
+        """Resolve a type node to its fully qualified name"""
+        if not type_node:
+            return None
+            
+        if hasattr(type_node, 'name'):
+            base_type = type_node.name
+        else:
+            base_type = str(type_node)
+            
+        # Handle array types
+        if hasattr(type_node, 'dimensions') and type_node.dimensions:
+            return f"{base_type}[]"
+            
+        # Handle generic types
+        if hasattr(type_node, 'type_arguments') and type_node.type_arguments:
+            type_args = [self.resolve_type(arg) for arg in type_node.type_arguments]
+            return f"{base_type}<{', '.join(type_args)}>"
+            
+        return base_type
+        
+    def infer_expression_type(self, expr_node, class_id, imports):
+        """
+        Infer the type of an expression node.
+        This is a simplified version - real IDEs do much more sophisticated type inference.
+        """
+        if hasattr(expr_node, 'type'):
+            return self.resolve_type(expr_node.type)
+            
+        if isinstance(expr_node, javalang.tree.Literal):
+            if isinstance(expr_node.value, str):
+                return "java.lang.String"
+            elif isinstance(expr_node.value, bool):
+                return "boolean"
+            elif isinstance(expr_node.value, int):
+                return "int"
+            elif isinstance(expr_node.value, float):
+                return "double"
+                
+        if isinstance(expr_node, javalang.tree.MethodInvocation):
+            # If it's a method call, try to resolve the return type
+            resolved_method_id = self.resolve_method_call(expr_node, class_id, 
+                                                        self.get_class_name(class_id), imports)
+            if resolved_method_id:
+                method = get_method(resolved_method_id)
+                if method:
+                    return method['return_type']
+                    
+        return "java.lang.Object"  # Default to Object if we can't determine the type
+        
+    def parse_method_signature(self, signature):
+        """Parse a method signature string into parameter types"""
+        # Extract the parameter part between parentheses
+        params_str = signature[signature.find('(')+1:signature.rfind(')')]
+        if not params_str:
+            return []
+            
+        # Split by comma and clean up each parameter
+        params = []
+        for param in params_str.split(','):
+            param = param.strip()
+            # Remove parameter name if present
+            if ' ' in param:
+                param = param.rsplit(' ', 1)[0]
+            params.append(param)
+            
+        return params
+        
+    def calculate_method_match_score(self, method_params, arg_types):
+        """
+        Calculate how well the method parameters match the argument types.
+        Returns a score between 0 and 1, where 1 is a perfect match.
+        """
+        if len(method_params) != len(arg_types):
+            return 0
+            
+        score = 0
+        for method_param, arg_type in zip(method_params, arg_types):
+            if method_param == arg_type:
+                score += 1
+            elif self.is_subtype(arg_type, method_param):
+                score += 0.8
+            elif self.is_convertible(arg_type, method_param):
+                score += 0.5
+                
+        return score / len(method_params)
+        
+    def is_subtype(self, type1, type2):
+        """Check if type1 is a subtype of type2"""
+        # This is a simplified version - real IDEs have more sophisticated type hierarchy checks
+        common_subtypes = {
+            'int': ['long', 'float', 'double'],
+            'long': ['float', 'double'],
+            'float': ['double'],
+            'byte': ['short', 'int', 'long', 'float', 'double'],
+            'short': ['int', 'long', 'float', 'double'],
+            'char': ['int', 'long', 'float', 'double']
+        }
+        
+        if type1 == type2:
+            return True
+            
+        if type1 in common_subtypes and type2 in common_subtypes[type1]:
+            return True
+            
+        return False
+        
+    def is_convertible(self, type1, type2):
+        """Check if type1 can be converted to type2"""
+        # This is a simplified version - real IDEs have more sophisticated conversion rules
+        convertible_types = {
+            'int': ['Integer', 'Number', 'Object'],
+            'long': ['Long', 'Number', 'Object'],
+            'float': ['Float', 'Number', 'Object'],
+            'double': ['Double', 'Number', 'Object'],
+            'boolean': ['Boolean', 'Object'],
+            'char': ['Character', 'Object'],
+            'byte': ['Byte', 'Number', 'Object'],
+            'short': ['Short', 'Number', 'Object']
+        }
+        
+        if type1 in convertible_types and type2 in convertible_types[type1]:
+            return True
+            
+        return False
     
     def resolve_class_from_imports(self, class_name, imports, current_class_id):
         """
@@ -437,4 +716,87 @@ class JavaAnalyzer:
         if class_name in common_java_classes:
             return java_lang_class
         
+        return None 
+
+    def resolve_field_type(self, class_id, field_name):
+        """
+        Resolve the type of a field in a class.
+        
+        Args:
+            class_id: The ID of the class containing the field
+            field_name: The name of the field to resolve
+            
+        Returns:
+            The fully qualified type name of the field, or None if not found
+        """
+        # First check if it's a field in the current class
+        fields = get_fields_by_class(class_id)
+        for field in fields:
+            if field['name'] == field_name:
+                return field['type_name']
+                
+        # If not found, check superclass
+        class_info = get_class(class_id)
+        if class_info and class_info.get('superclass'):
+            superclass_id = self.get_class_id(class_info['superclass'])
+            if superclass_id:
+                return self.resolve_field_type(superclass_id, field_name)
+                
+        return None
+
+    def get_methods_by_class(self, class_id):
+        """
+        Get all methods belonging to a class.
+        
+        Args:
+            class_id: The ID of the class
+            
+        Returns:
+            List of method dictionaries containing method information
+        """
+        # First get methods directly in the class
+        methods = []
+        
+        # Get methods from database
+        class_methods = get_methods_by_class(class_id)
+        if class_methods:
+            methods.extend(class_methods)
+            
+        # Get methods from superclass
+        class_info = get_class(class_id)
+        if class_info and class_info.get('superclass'):
+            superclass_id = self.get_class_id(class_info['superclass'])
+            if superclass_id:
+                superclass_methods = self.get_methods_by_class(superclass_id)
+                if superclass_methods:
+                    methods.extend(superclass_methods)
+                    
+        # Get methods from interfaces
+        if class_info and class_info.get('interfaces'):
+            for interface in class_info['interfaces']:
+                interface_id = self.get_class_id(interface)
+                if interface_id:
+                    interface_methods = self.get_methods_by_class(interface_id)
+                    if interface_methods:
+                        methods.extend(interface_methods)
+                        
+        return methods
+
+    def get_class_name(self, class_id):
+        """
+        Get the fully qualified name of a class from its ID.
+        
+        Args:
+            class_id: The ID of the class
+            
+        Returns:
+            The fully qualified name of the class
+        """
+        class_info = get_class(class_id)
+        if class_info:
+            package = class_info.get('package', '')
+            name = class_info.get('name', '')
+            if package:
+                return f"{package}.{name}"
+            return name
         return None 
